@@ -1,7 +1,10 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <strings.h>
 #include "pico/stdlib.h"
 #include "hardware/structs/systick.h"
 #include "hardware/clocks.h"
+#include "hardware/sync.h"
 #include "hardware/structs/clocks.h"
 
 #define GET_SYSTICK systick_hw->cvr
@@ -22,6 +25,7 @@
      --SeeeeeeeeeeeeeeeeeeeeeeeeeE----R  (wrap - end time E > start time S)
 */
 
+void sysTickDelay (uint32_t count) __attribute__((noinline));
 void sysTickDelay (uint32_t count)
 {
   uint32_t reload = GET_SYSTICKMAX;
@@ -41,8 +45,8 @@ void sysTickDelay (uint32_t count)
   } else {
     end += reload;  // wrap the end time
     while (1) {
-      now = GET_SYSTICK;
-      if ((now <= end) && (now > start))
+        now = GET_SYSTICK;
+        if ((now <= end) && (now > start))
         return;
     }
   }
@@ -50,9 +54,13 @@ void sysTickDelay (uint32_t count)
 
 /*
  * This should work as well?
- * Here, we see if the delta has wrapped and adjust it, instead
- * of comparing separate "wrapped" and "unwrapped" regions.
+
+ * Here, we see if the delta has wrapped and adjust it, instead of
+ * comparing separate "wrapped" and "unwrapped" regions.  It looks
+ * like this results in slightly smaller code, with slightly more
+ * overhead.
  */
+void sysTickDelay2 (uint32_t count) __attribute__((noinline));
 void sysTickDelay2 (uint32_t count)
 {
   int32_t start, elapsed, reload;
@@ -85,23 +93,27 @@ int main() {
     ticksPerUs = clock_get_hz(clk_sys)/1000000;
     printf("\n\nStarting\nCurrent Clock Rate is %dMHz\n", ticksPerUs);
     systick_hw->csr = 0x5;
-    systick_hw->rvr = 0x00FFFFFF;
+    systick_hw->rvr = 0x00FFFFFF;  // This is the max value for the reload count
+    sysTickDelay(100);
+    (void) systick_hw->cvr;
 
     uint32_t new, old, t0, t1;
     while (1) {
-        for (int t=10; t < 5000; t += 13) {
+        for (int t=10; t < 20; t += 1) {
             old=systick_hw->cvr;
             t0=time_us_32();
-            sleep(t);
+            //           sleep(t);
+            //    sysTickDelay2(t);
+            sysTickDelay(t);
             new=systick_hw->cvr;
             t1=time_us_32();
-            printf("\n Target us = %d\n", t);
+            printf("\n Target ticks = %d\n", t);
             printf("   old-new=%d  (%d delta)\n",old-new, (old-new)-t);
-            printf("   t1-t0=    %d\n",t1-t0);
-//            printf("(old-new)/(t1-t0)=%.1f\n",(old-new)/(t1-t0*1.0));
-            sleep_ms(1000);
+            printf("   t1-t0=    %dus\n",t1-t0);
+            sleep_ms(1000 + (rand() % 37));  // try to avoid lockstep behavior
         }
         printf("\nSTARTING OVER\n");
+        sleep_ms(5000);
     }
     return 0;
 }
